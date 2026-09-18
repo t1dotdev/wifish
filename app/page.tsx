@@ -1542,7 +1542,9 @@ export default function Page() {
         <Sidebar>
           <SidebarHeader>
             <div className="flex items-center gap-2 px-2 py-3">
-              <span className="font-[family-name:var(--font-pixel)] text-lg tracking-tight text-primary group-data-[collapsible=icon]:hidden">wifish</span>
+              <span className="font-(family-name:--font-pixel)  text-lg tracking-tight text-primary group-data-[collapsible=icon]:hidden">
+                wifish
+              </span>
             </div>
           </SidebarHeader>
           <SidebarContent>
