@@ -1,13 +1,14 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ComponentType } from 'react';
 import type { CrackResult, FileEntry } from '@/lib/fs';
-import { Wifi, Hash, List, KeyRound, Zap, Upload, Download, Trash2, Play, Square, FolderOpen, Activity } from 'lucide-react';
+import { Wifi, Hash, List, KeyRound, Zap, Upload, Download, Trash2, Play, Square, FolderOpen, Activity, Settings2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Card, CardHeader, CardTitle, CardDescription, CardAction, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
 import { Terminal } from '@/components/ui/terminal';
@@ -46,6 +47,7 @@ interface SessionView {
   wordlist: string | null;
   command?: string;
   startedAt: string;
+  endedAt?: string;
   canStop?: boolean;
   log?: string;
   logTruncated?: boolean;
@@ -66,6 +68,15 @@ interface CrackStatus {
   total: string | null;
   finished: boolean;
 }
+
+const fmtDur = (ms: number) => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return h ? `${h}h ${m}m ${sec}s` : m ? `${m}m ${sec}s` : `${sec}s`;
+};
+// Duration for a finished session; null while running or if timestamps are missing.
+const sessionDuration = (s: { startedAt?: string; endedAt?: string }) =>
+  s.endedAt && s.startedAt ? fmtDur(Date.parse(s.endedAt) - Date.parse(s.startedAt)) : null;
 
 const fmt = (n: number) => {
   if (n < 1024) return `${n} B`;
@@ -267,6 +278,7 @@ function SessionHistory({ sessions, selectedId, loaded, onSelect }: {
                 const engine = session.method === 'aircrack' ? 'aircrack-ng' : 'hashcat';
                 const status = session.processState === 'paused' ? 'paused' : session.status;
                 const name = session.target || `${engine} · PID ${session.pid || '—'}`;
+                const dur = sessionDuration(session);
                 return (
                   <SidebarMenuItem key={session.id}>
                     <SidebarMenuButton size="lg" isActive={selectedId === session.id} aria-pressed={selectedId === session.id}
@@ -275,7 +287,7 @@ function SessionHistory({ sessions, selectedId, loaded, onSelect }: {
                       {active(session) ? <Activity /> : <Hash />}
                       <span className="flex min-w-0 flex-1 flex-col gap-0.5 group-data-[collapsible=icon]:hidden">
                         <span className="truncate">{name}</span>
-                        <span className="truncate text-xs text-muted-foreground">{engine} · {status}{session.source === 'system' ? ' · external' : ''}</span>
+                        <span className="truncate text-xs text-muted-foreground">{engine} · {status}{dur ? ` · ${dur}` : ''}{session.source === 'system' ? ' · external' : ''}</span>
                       </span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -297,7 +309,9 @@ export default function Page() {
   const [shownHash, setShownHash] = useState('');
   const [selList, setSelList] = useState('');
   const [log, setLog] = useState('');
-  const [view, setView] = useState<'overview' | 'files' | 'keys'>('overview');
+  const [view, setView] = useState<'overview' | 'files' | 'keys' | 'settings'>('overview');
+  const [workload, setWorkload] = useState(1);      // hashcat -w (1-4)
+  const [statusTimer, setStatusTimer] = useState(1); // hashcat --status-timer seconds
   const [sessions, setSessions] = useState<SessionView[]>([]);
   const [session, setSession] = useState<SessionView | null>(null);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
@@ -308,6 +322,18 @@ export default function Page() {
   const [stopping, setStopping] = useState(false);
   const [clearing, setClearing] = useState(false);
   const selectedRef = useRef<string | null>(null);
+
+  // Panel settings live in the browser (single local console); sent with each crack start.
+  useEffect(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem('wifish-settings') || '{}');
+      if (Number.isFinite(s.workload)) setWorkload(Math.min(4, Math.max(1, Math.floor(s.workload))));
+      if (Number.isFinite(s.statusTimer)) setStatusTimer(Math.min(3600, Math.max(1, Math.floor(s.statusTimer))));
+    } catch {}
+  }, []);
+  useEffect(() => {
+    try { localStorage.setItem('wifish-settings', JSON.stringify({ workload, statusTimer })); } catch {}
+  }, [workload, statusTimer]);
   const completedRef = useRef(new Set<string>());
   const running = session != null && ['running', 'stopping'].includes(session.status);
   const panelBusy = sessions.some((s) => s.source === 'panel' && ['running', 'stopping'].includes(s.status));
@@ -460,7 +486,7 @@ export default function Page() {
     if (starting || panelBusy) return;
     setStarting(true);
     try {
-      const response = await fetch('/api/crack', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ method, target, wordlist: selList }) });
+      const response = await fetch('/api/crack', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ method, target, wordlist: selList, workload, statusTimer }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Cannot start session');
       setSessions((all) => [data.session, ...all]); selectSession(data.session);
@@ -518,8 +544,9 @@ export default function Page() {
     { key: 'overview', label: 'Crack', icon: Zap, badge: 0 },
     { key: 'files', label: 'Files', icon: FolderOpen, badge: totalFiles },
     { key: 'keys', label: 'Recovered keys', icon: KeyRound, badge: results?.length || 0 },
+    { key: 'settings', label: 'Settings', icon: Settings2, badge: 0 },
   ] as const;
-  const title = view === 'files' ? 'Files' : view === 'keys' ? 'Recovered keys' : 'Crack';
+  const title = view === 'files' ? 'Files' : view === 'keys' ? 'Recovered keys' : view === 'settings' ? 'Settings' : 'Crack';
 
   // ---- four directory stations ----
   const stationsGrid = (
@@ -643,7 +670,7 @@ export default function Page() {
                 {session?.target || (session ? 'System process' : 'No session selected')}
               </p>
               <p className="mt-1 break-all text-xs text-muted-foreground">
-                {session ? `${session.method === 'aircrack' ? 'aircrack-ng' : 'hashcat'} · PID ${session.pid || '—'}${session.wordlist ? ` · ${session.wordlist}` : ''}` : 'Choose an engine, target and wordlist to start.'}
+                {session ? `${session.method === 'aircrack' ? 'aircrack-ng' : 'hashcat'} · PID ${session.pid || '—'}${session.wordlist ? ` · ${session.wordlist}` : ''}${sessionDuration(session) ? ` · ran ${sessionDuration(session)}` : ''}` : 'Choose an engine, target and wordlist to start.'}
               </p>
             </div>
             {running && session?.source === 'panel' && (
@@ -728,6 +755,45 @@ export default function Page() {
     </Card>
   );
 
+  const settingsCard = (
+    <Card className="max-w-xl">
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Settings2 className="size-4 text-muted-foreground" />
+          <CardTitle className="lowercase">crack settings</CardTitle>
+        </div>
+        <CardDescription>Applied to hashcat runs started from this panel. Saved in this browser.</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-6">
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-2 text-sm">
+            <span className="font-medium">Workload</span>
+            <span className="font-mono text-xs text-muted-foreground">-w</span>
+          </div>
+          <ToggleGroup aria-label="hashcat workload" value={[String(workload)]} onValueChange={(v) => { if (v.length) setWorkload(Number(v[0])); }} variant="outline" spacing={0} className="w-full">
+            <ToggleGroupItem value="1" className="flex-1">1 · low</ToggleGroupItem>
+            <ToggleGroupItem value="2" className="flex-1">2 · default</ToggleGroupItem>
+            <ToggleGroupItem value="3" className="flex-1">3 · high</ToggleGroupItem>
+            <ToggleGroupItem value="4" className="flex-1">4 · nightmare</ToggleGroupItem>
+          </ToggleGroup>
+          <p className="text-xs text-muted-foreground">Low keeps the machine responsive; higher taxes the GPU harder.</p>
+        </div>
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-2 text-sm">
+            <span className="font-medium">Status timer</span>
+            <span className="font-mono text-xs text-muted-foreground">--status-timer</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Input type="number" min={1} max={3600} value={statusTimer}
+              onChange={(e) => setStatusTimer(Math.min(3600, Math.max(1, Math.floor(Number(e.target.value) || 1))))}
+              className="w-28" aria-label="status timer seconds" />
+            <span className="text-sm text-muted-foreground">seconds between progress updates</span>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+
   return (
     <TooltipProvider>
       <SidebarProvider>
@@ -788,6 +854,7 @@ export default function Page() {
             {(sessionError || streamError) && <Alert variant="destructive"><AlertDescription>{sessionError || streamError}</AlertDescription></Alert>}
             {view === 'files' && stationsGrid}
             {view === 'overview' && crackWorkspace}
+            {view === 'settings' && settingsCard}
             {view === 'keys' && (resultsCard ?? (
               <Empty className="min-h-52">
                 <EmptyHeader>

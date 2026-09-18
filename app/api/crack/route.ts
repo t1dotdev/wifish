@@ -10,6 +10,10 @@ export const dynamic = 'force-dynamic';
 const store = globalThis.__wifishSessions ??= createSessionStore({ onResults: writeCracked });
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'cache-control': 'no-store' } });
 const errorResponse = (error: any) => json({ error: error.message }, error.status || 500);
+const clampInt = (v: unknown, min: number, max: number, def: number) => {
+  const n = Math.floor(Number(v));
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : def;
+};
 
 export async function GET(req: Request) {
   try {
@@ -39,9 +43,12 @@ export async function POST(req: Request) {
     if (stats.some((s) => !s.isFile())) return json({ error: 'target and wordlist must be files' }, 400);
   } catch { return json({ error: 'target or wordlist does not exist' }, 400); }
   const command = method === 'aircrack' ? 'aircrack-ng' : 'hashcat';
+  // hashcat -w (workload 1-4) and --status-timer (seconds) come from panel settings; aircrack has no equivalent.
+  const workload = clampInt(body.workload, 1, 4, 1);
+  const statusTimer = clampInt(body.statusTimer, 1, 3600, 1);
   const args = method === 'aircrack'
     ? ['-w', list.abs, target.abs]
-    : ['-m', '22000', target.abs, list.abs, '--status', '--status-timer', '2', '--potfile-path', POTFILE, '-w', '3'];
+    : ['-m', '22000', target.abs, list.abs, '--status', '--status-timer', String(statusTimer), '--potfile-path', POTFILE, '-w', String(workload)];
   try {
     // Request cancellation only disconnects the viewer. DELETE is the explicit stop action.
     return json({ session: await store.start({ method, target: target.base, wordlist: list.base, command, args }) }, 201);
