@@ -822,8 +822,8 @@ export default function Page() {
       <SidebarProvider>
         <Sidebar collapsible="icon">
           <SidebarHeader>
-            <div className="flex items-center gap-2 px-2 py-3">
-              <span className="font-[family-name:var(--font-pixel)] text-lg tracking-tight text-primary group-data-[collapsible=icon]:hidden">wifish</span>
+            <div className="flex items-center gap-2 px-2 py-1">
+              <img src="/wifish-logo.png" alt="wifish" className="h-8 w-auto invert dark:invert-0 group-data-[collapsible=icon]:hidden" />
             </div>
           </SidebarHeader>
           <SidebarContent>
