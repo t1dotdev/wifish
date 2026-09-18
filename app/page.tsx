@@ -171,28 +171,6 @@ function FileSelect({ icon: Icon, value, onValueChange, placeholder, files, aria
   );
 }
 
-// native HTML5 drag-drop; a <label> gives click-to-browse + keyboard focus for free.
-function Dropzone({ onFiles, accept, hint }: { onFiles: (list: FileList) => void; accept?: string; hint: string }) {
-  const [over, setOver] = useState(false);
-  return (
-    <label
-      onDragOver={(e) => { e.preventDefault(); setOver(true); }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(e) => { e.preventDefault(); setOver(false); if (e.dataTransfer.files.length) onFiles(e.dataTransfer.files); }}
-      className={cn(
-        'flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed p-6 text-center transition-colors',
-        over ? 'border-ring bg-muted/60' : 'hover:bg-muted/40',
-      )}
-    >
-      <Upload className="size-5 text-muted-foreground" />
-      <span className="text-sm font-medium">Drop capture here or click to browse</span>
-      <span className="text-xs text-muted-foreground">{hint}</span>
-      <input type="file" accept={accept} multiple className="sr-only"
-        onChange={(e) => { if (e.target.files?.length) onFiles(e.target.files); e.target.value = ''; }} />
-    </label>
-  );
-}
-
 function Stat({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
   return (
     <div className={cn('rounded-lg border p-2.5', className)}>
@@ -535,21 +513,6 @@ export default function Page() {
     </div>
   );
 
-  const uploadCard = (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <Upload className="size-4 text-muted-foreground" />
-          <CardTitle className="lowercase">upload</CardTitle>
-        </div>
-        <CardDescription>capture → auto .hc22000</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Dropzone accept=".pcap,.cap,.pcapng" hint="saves as pcap · auto-converts to .hc22000" onFiles={dropCapture} />
-      </CardContent>
-    </Card>
-  );
-
   const systemSessionsCard = (
     <Card aria-label="System sessions">
       <CardHeader>
@@ -627,6 +590,11 @@ export default function Page() {
             ? <FileSelect icon={Wifi} value={selCap} onValueChange={setSelCap} placeholder="Capture…" files={files.pcap} ariaLabel="capture to crack" />
             : <FileSelect icon={Hash} value={selHash} onValueChange={setSelHash} placeholder="Hash…" files={files.hc22000} ariaLabel="hash to crack" />}
           <FileSelect icon={List} value={selList} onValueChange={setSelList} placeholder="Wordlist…" files={files.wordlists} ariaLabel="wordlist" />
+          <Button variant="outline" aria-label="upload capture" nativeButton={false} render={<label />}>
+            <Upload data-icon="inline-start" /> Upload
+            <input type="file" accept=".pcap,.cap,.pcapng" multiple className="sr-only"
+              onChange={(e) => { if (e.target.files?.length) dropCapture(e.target.files); e.target.value = ''; }} />
+          </Button>
           {running && session?.source === 'panel'
             ? (
               <Button variant="destructive" onClick={abort} disabled={stopping || session.status === 'stopping' || !session.canStop}>
@@ -792,11 +760,8 @@ export default function Page() {
             {view === 'sessions' && systemSessionsCard}
             {view === 'overview' && (
               <>
-                <div className="grid gap-4 lg:grid-cols-2">
-                  {uploadCard}
-                  {systemSessionsCard}
-                </div>
                 {crackCard}
+                {systemSessionsCard}
                 {resultsCard}
               </>
             )}
