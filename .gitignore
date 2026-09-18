@@ -1,0 +1,8 @@
+node_modules
+.next
+.next-dev
+.wifish
+hashcat.potfile
+*.restore
+.impeccable
+*.tsbuildinfo
