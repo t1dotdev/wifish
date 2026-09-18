@@ -1,13 +1,13 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ComponentType } from 'react';
 import type { CrackResult, FileEntry } from '@/lib/fs';
-import { Wifi, Hash, List, KeyRound, Zap, Upload, Download, Trash2, Play, Square, Gauge, LayoutGrid, FolderOpen, Activity } from 'lucide-react';
+import { Wifi, Hash, List, KeyRound, Zap, Upload, Download, Trash2, Play, Square, FolderOpen, Activity } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Card, CardHeader, CardTitle, CardDescription, CardAction, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
 import { Spinner } from '@/components/ui/spinner';
@@ -19,7 +19,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarHeader,
   SidebarInset, SidebarMenu, SidebarMenuBadge, SidebarMenuButton, SidebarMenuItem,
-  SidebarProvider, SidebarTrigger,
+  SidebarProvider, SidebarTrigger, SidebarGroupLabel, useSidebar,
 } from '@/components/ui/sidebar';
 
 type DirKind = 'pcap' | 'hc22000' | 'wordlists' | 'cracked';
@@ -65,9 +65,6 @@ interface CrackStatus {
   total: string | null;
   finished: boolean;
 }
-
-const RING_R = 79;
-const RING_C = 2 * Math.PI * RING_R;
 
 const fmt = (n: number) => {
   if (n < 1024) return `${n} B`;
@@ -158,9 +155,9 @@ function FileSelect({ icon: Icon, value, onValueChange, placeholder, files, aria
 }) {
   return (
     <Select value={value} onValueChange={(v) => onValueChange(v as string)}>
-      <SelectTrigger aria-label={ariaLabel} className="w-full flex-1">
+      <SelectTrigger aria-label={ariaLabel} className="w-full min-w-0 flex-1">
         <Icon className="text-muted-foreground" />
-        <SelectValue>{(v: string) => v || <span className="text-muted-foreground">{placeholder}</span>}</SelectValue>
+        <SelectValue className="truncate">{(v: string) => v || <span className="text-muted-foreground">{placeholder}</span>}</SelectValue>
       </SelectTrigger>
       <SelectContent>
         {files.length === 0
@@ -173,9 +170,9 @@ function FileSelect({ icon: Icon, value, onValueChange, placeholder, files, aria
 
 function Stat({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
   return (
-    <div className={cn('rounded-lg border p-2.5', className)}>
+    <div className={cn('min-w-0 py-4', className)}>
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-0.5 text-sm font-medium tabular-nums">{children}</div>
+      <div className="mt-2 text-lg font-medium tabular-nums break-words">{children}</div>
     </div>
   );
 }
@@ -221,7 +218,51 @@ function LogTerminal({ data }: { data: string }) {
     writtenRef.current = data;
   }, [data, ready]);
 
-  return <div ref={hostRef} className="w-fit max-w-full overflow-hidden rounded-lg border bg-[#0a0a0a] p-2" />;
+  return <div ref={hostRef} className="max-w-full overflow-x-auto rounded-lg border bg-[#0a0a0a] p-2" />;
+}
+
+function SessionHistory({ sessions, selectedId, loaded, onSelect }: {
+  sessions: SessionView[]; selectedId?: string; loaded: boolean; onSelect: (session: SessionView) => void;
+}) {
+  const { setOpenMobile } = useSidebar();
+  const active = (session: SessionView) => ['running', 'stopping'].includes(session.status);
+  const groups = [
+    { label: 'Active sessions', items: sessions.filter(active) },
+    { label: 'Recent sessions', items: sessions.filter((session) => !active(session)) },
+  ];
+  return (
+    <>
+      {!loaded && <p className="px-4 py-3 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">Checking sessions…</p>}
+      {loaded && sessions.length === 0 && <p className="px-4 py-3 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">No sessions yet. Start a crack to see it here.</p>}
+      {groups.filter((group) => group.items.length > 0).map((group) => (
+        <SidebarGroup key={group.label}>
+          <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {[...group.items].sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt)).map((session) => {
+                const engine = session.method === 'aircrack' ? 'aircrack-ng' : 'hashcat';
+                const status = session.processState === 'paused' ? 'paused' : session.status;
+                const name = session.target || `${engine} · PID ${session.pid || '—'}`;
+                return (
+                  <SidebarMenuItem key={session.id}>
+                    <SidebarMenuButton size="lg" isActive={selectedId === session.id} aria-pressed={selectedId === session.id}
+                      tooltip={`${name} · ${status}`} title={`${name}\n${engine} · ${status} · PID ${session.pid || '—'}\n${new Date(session.startedAt).toLocaleString()}${session.wordlist ? `\n${session.wordlist}` : ''}`}
+                      onClick={() => { onSelect(session); setOpenMobile(false); }}>
+                      {active(session) ? <Activity /> : <Hash />}
+                      <span className="flex min-w-0 flex-1 flex-col gap-0.5 group-data-[collapsible=icon]:hidden">
+                        <span className="truncate">{name}</span>
+                        <span className="truncate text-xs text-muted-foreground">{engine} · {status}{session.source === 'system' ? ' · external' : ''}</span>
+                      </span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      ))}
+    </>
+  );
 }
 
 export default function Page() {
@@ -232,8 +273,7 @@ export default function Page() {
   const [shownHash, setShownHash] = useState('');
   const [selList, setSelList] = useState('');
   const [log, setLog] = useState('');
-  const [view, setView] = useState<'overview' | 'files' | 'sessions'>('overview');
-  const [tab, setTab] = useState<'status' | 'log'>('status');
+  const [view, setView] = useState<'overview' | 'files' | 'keys'>('overview');
   const [sessions, setSessions] = useState<SessionView[]>([]);
   const [session, setSession] = useState<SessionView | null>(null);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
@@ -265,7 +305,7 @@ export default function Page() {
   function selectSession(s: SessionView) {
     selectedRef.current = s.id;
     try { localStorage.setItem('wifish-session', s.id); } catch {}
-    setSession(s); setLog(''); setResults(null); setTab('status');
+    setSession(s); setLog(''); setResults(null);
     setMethod(s.method);
     if (s.source === 'panel') {
       if (s.method === 'aircrack') setSelCap(s.target ?? ''); else setSelHash(s.target ?? '');
@@ -346,7 +386,7 @@ export default function Page() {
   }, [refresh]);
 
   useEffect(() => { refresh(); }, [refresh]);
-  useEffect(() => { if (tab === 'log' && preRef.current) preRef.current.scrollTop = preRef.current.scrollHeight; }, [log, tab]);
+  useEffect(() => { if (preRef.current) preRef.current.scrollTop = preRef.current.scrollHeight; }, [log]);
 
   async function uploadFiles(dir: DirKind, list: FileList | File[]): Promise<string[]> {
     const items = Array.from(list);
@@ -385,7 +425,7 @@ export default function Page() {
     const j = await (await fetch('/api/convert', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) })).json();
     if (j.ok) flash(`wrote ${j.out}${j.ssid ? ` · ${j.ssid}` : ''}`);
     else flash(j.error || `no handshake / PMKID in ${name}`, true);
-    if (!selectedRef.current) { setLog(j.log || ''); setTab('log'); }
+    if (!selectedRef.current) { setLog(j.log || ''); }
     return !!j.ok;
   }
 
@@ -441,7 +481,7 @@ export default function Page() {
     setSelHash(h); setShownHash(h);
     const j = await (await fetch('/api/cracked', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ hash: h }) })).json();
     if (j.error) return flash(j.error, true);
-    setResults(j.results || []); refresh();
+    setResults(j.results || []); setView('keys'); refresh();
   }
 
   const n = (d: DirKind) => files[d]?.length || 0;
@@ -451,11 +491,11 @@ export default function Page() {
   const activeSessions = sessions.filter((s) => ['running', 'stopping'].includes(s.status)).length;
 
   const NAV = [
-    { key: 'overview', label: 'Overview', icon: LayoutGrid, badge: 0 },
+    { key: 'overview', label: 'Crack', icon: Zap, badge: 0 },
     { key: 'files', label: 'Files', icon: FolderOpen, badge: totalFiles },
-    { key: 'sessions', label: 'Sessions', icon: Activity, badge: activeSessions },
+    { key: 'keys', label: 'Recovered keys', icon: KeyRound, badge: results?.length || 0 },
   ] as const;
-  const title = view === 'files' ? 'Files' : view === 'sessions' ? 'Sessions' : 'Overview';
+  const title = view === 'files' ? 'Files' : view === 'keys' ? 'Recovered keys' : 'Crack';
 
   // ---- four directory stations ----
   const stationsGrid = (
@@ -513,163 +553,119 @@ export default function Page() {
     </div>
   );
 
-  const systemSessionsCard = (
-    <Card aria-label="System sessions">
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <List className="size-4 text-muted-foreground" />
-          <CardTitle>System sessions</CardTitle>
-        </div>
-        <CardDescription>{sessionsLoaded ? `${activeSessions} active · this system` : 'checking system…'}</CardDescription>
-        <CardAction>
-          <Button variant="destructive" size="icon-sm" aria-label="clear finished sessions" onClick={clearSessions} disabled={clearing || !finishedCount}>
-            {clearing ? <Spinner /> : <Trash2 />}
-          </Button>
-        </CardAction>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-2">
-        <p className="text-xs text-muted-foreground">Sessions keep running when you refresh or close this page.</p>
-        {(sessionError || streamError) && (
-          <Alert variant="destructive"><AlertDescription>{sessionError || streamError}</AlertDescription></Alert>
-        )}
-        {sessionsLoaded && sessions.length === 0 && !sessionError && (
-          <p className="text-xs text-muted-foreground">No hashcat or aircrack-ng sessions running. Choose a target and wordlist below to start.</p>
-        )}
-        {sessions.length > 0 && (
-          <ul className="flex flex-col gap-1.5">
-            {sessions.map((s) => (
-              <li key={s.id}>
-                <button
-                  type="button"
-                  aria-pressed={session?.id === s.id}
-                  onClick={() => selectSession(s)}
-                  className={cn(
-                    'flex w-full flex-col gap-1 rounded-lg border p-2.5 text-left transition-colors hover:bg-muted/60',
-                    session?.id === s.id && 'border-ring bg-muted',
-                  )}
-                >
-                  <span className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium">{s.method === 'aircrack' ? 'aircrack-ng' : 'hashcat'}</span>
-                    <Badge variant={['running', 'stopping'].includes(s.status) ? 'default' : 'secondary'}>
-                      {s.processState === 'paused' ? 'paused' : s.status}
-                    </Badge>
-                  </span>
-                  <span className="truncate text-xs text-muted-foreground" title={s.target || s.command}>{s.target || s.command}</span>
-                  <span className="text-xs text-muted-foreground">
-                    PID {s.pid || '—'} · {s.source === 'panel' ? 'panel' : 'started outside panel'} · {new Date(s.startedAt).toLocaleString()}{s.wordlist ? ` · ${s.wordlist}` : ''}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </CardContent>
-    </Card>
-  );
+  const target = method === 'aircrack' ? selCap : selHash;
+  const startHint = !sessionsLoaded ? 'Checking for active sessions…'
+    : panelBusy ? 'A panel session is active. Stop it before starting another.'
+    : !target ? `Select a ${method === 'aircrack' ? 'capture' : 'hash'} to continue.`
+    : !selList ? 'Select a wordlist to continue.' : 'Ready to start a dictionary attack.';
+  const progressKnown = st?.pct != null;
 
-  const crackCard = (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <Zap className="size-4 text-muted-foreground" />
-          <CardTitle className="lowercase">crack</CardTitle>
+  const crackWorkspace = (
+    <section aria-labelledby="crack-title" className="overflow-hidden rounded-xl border bg-card text-card-foreground">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
+        <div className="flex items-center gap-3">
+          <Zap className="size-5 text-muted-foreground" />
+          <h2 id="crack-title" className="text-lg font-medium">crack</h2>
+          <span className="hidden text-sm text-muted-foreground sm:inline">Dictionary attack</span>
         </div>
-        <CardDescription>{method === 'aircrack' ? 'aircrack-ng · dictionary' : 'hashcat -m 22000'}</CardDescription>
-        <CardAction>
-          <Tabs value={method} onValueChange={(v) => setMethod(v as Method)}>
-            <TabsList>
-              <TabsTrigger value="aircrack">aircrack-ng</TabsTrigger>
-              <TabsTrigger value="hashcat">hashcat</TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </CardAction>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <div className="flex flex-col gap-2 sm:flex-row">
-          {method === 'aircrack'
-            ? <FileSelect icon={Wifi} value={selCap} onValueChange={setSelCap} placeholder="Capture…" files={files.pcap} ariaLabel="capture to crack" />
-            : <FileSelect icon={Hash} value={selHash} onValueChange={setSelHash} placeholder="Hash…" files={files.hc22000} ariaLabel="hash to crack" />}
-          <FileSelect icon={List} value={selList} onValueChange={setSelList} placeholder="Wordlist…" files={files.wordlists} ariaLabel="wordlist" />
-          <Button variant="outline" aria-label="upload capture" nativeButton={false} render={<label />}>
-            <Upload data-icon="inline-start" /> Upload
-            <input type="file" accept=".pcap,.cap,.pcapng" multiple className="sr-only"
-              onChange={(e) => { if (e.target.files?.length) dropCapture(e.target.files); e.target.value = ''; }} />
-          </Button>
-          {running && session?.source === 'panel'
-            ? (
-              <Button variant="destructive" onClick={abort} disabled={stopping || session.status === 'stopping' || !session.canStop}>
+        <Badge variant="outline">one panel run at a time</Badge>
+      </header>
+      <div className="grid min-w-0 lg:grid-cols-[260px_minmax(0,1fr)]">
+        <div className={cn("flex min-w-0 flex-col gap-6 border-b bg-muted/20 p-5 lg:order-first lg:border-r lg:border-b-0", session && "order-last border-t lg:border-t-0")}>
+          <fieldset className="flex min-w-0 flex-col gap-2">
+            <legend className="mb-2 text-sm font-medium">Engine</legend>
+            <ToggleGroup aria-label="Crack engine" value={[method]} onValueChange={(values) => { if (values.length) setMethod(values[0] as Method); }} variant="outline" spacing={0} className="w-full">
+              <ToggleGroupItem value="aircrack" className="flex-1">aircrack-ng</ToggleGroupItem>
+              <ToggleGroupItem value="hashcat" className="flex-1">hashcat</ToggleGroupItem>
+            </ToggleGroup>
+            <p className="text-xs text-muted-foreground">{method === 'aircrack' ? 'CPU · pcap handshake' : 'GPU · hashcat -m 22000'}</p>
+          </fieldset>
+          <div className="flex min-w-0 flex-col gap-2">
+            <div className="flex items-center justify-between gap-2 text-sm">
+              <span className="font-medium">{method === 'aircrack' ? 'Capture' : 'Hash'}</span>
+              <span className="font-mono text-xs text-muted-foreground">{method === 'aircrack' ? '.pcap' : '.hc22000'}</span>
+            </div>
+            {method === 'aircrack'
+              ? <FileSelect icon={Wifi} value={selCap} onValueChange={setSelCap} placeholder="Select capture" files={files.pcap} ariaLabel="capture to crack" />
+              : <FileSelect icon={Hash} value={selHash} onValueChange={setSelHash} placeholder="Select hash" files={files.hc22000} ariaLabel="hash to crack" />}
+            <Button variant="ghost" size="sm" className="self-start" nativeButton={false} render={<label />}>
+              <Upload data-icon="inline-start" /> Upload capture
+              <input aria-label="Upload capture" type="file" accept=".pcap,.cap,.pcapng" multiple className="sr-only"
+                onChange={(e) => { if (e.target.files?.length) dropCapture(e.target.files); e.target.value = ''; }} />
+            </Button>
+          </div>
+          <div className="flex min-w-0 flex-col gap-2">
+            <span className="text-sm font-medium">Wordlist</span>
+            <FileSelect icon={List} value={selList} onValueChange={setSelList} placeholder="Select wordlist" files={files.wordlists} ariaLabel="wordlist" />
+            {files.wordlists.length === 0 && <p className="text-xs text-muted-foreground">Add a wordlist in Files to start.</p>}
+          </div>
+          <div className="flex flex-col gap-3 pt-2">
+            <Button onClick={crack} className="w-full" disabled={starting || panelBusy || !sessionsLoaded || !target || !selList}>
+              {starting ? <Spinner data-icon="inline-start" /> : <Play data-icon="inline-start" />}
+              {starting ? 'Starting…' : 'Run crack'}
+            </Button>
+            <p className="text-xs leading-relaxed text-muted-foreground">{startHint}</p>
+          </div>
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-5 p-5 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-sm font-medium">{session ? 'Selected session' : 'Session monitor'}</h3>
+                <Badge variant={running ? 'default' : 'secondary'}>{stateWord}</Badge>
+              </div>
+              <p className="mt-2 truncate font-mono text-sm" title={session?.target || session?.command || undefined}>
+                {session?.target || (session ? 'System process' : 'No session selected')}
+              </p>
+              <p className="mt-1 break-all text-xs text-muted-foreground">
+                {session ? `${session.method === 'aircrack' ? 'aircrack-ng' : 'hashcat'} · PID ${session.pid || '—'}${session.wordlist ? ` · ${session.wordlist}` : ''}` : 'Choose an engine, target and wordlist to start.'}
+              </p>
+            </div>
+            {running && session?.source === 'panel' && (
+              <Button variant="destructive" size="sm" onClick={abort} disabled={stopping || session.status === 'stopping' || !session.canStop}>
                 {stopping || session.status === 'stopping' ? <Spinner data-icon="inline-start" /> : <Square data-icon="inline-start" />}
                 {stopping || session.status === 'stopping' ? 'Stopping…' : 'Abort'}
               </Button>
-            )
-            : (
-              <Button onClick={crack} disabled={starting || panelBusy || !sessionsLoaded || (method === 'aircrack' ? !selCap : !selHash) || !selList}>
-                {starting ? <Spinner data-icon="inline-start" /> : <Play data-icon="inline-start" />}
-                {starting ? 'Starting…' : 'Run'}
-              </Button>
             )}
-        </div>
-
-        {session && <p className="text-xs text-muted-foreground">Viewing {session.method === 'aircrack' ? 'aircrack-ng' : 'hashcat'} · PID {session.pid || '—'} · {session.target || 'system session'}</p>}
-        {session?.source === 'system' && <p className="text-xs text-muted-foreground">Process detected on this system. Live output and stop controls are available only for sessions started by this panel.</p>}
-        {session?.logTruncated && <p className="text-xs text-muted-foreground">Showing the latest 256 KB of output. Full log saved on disk.</p>}
-
-        <Tabs value={tab} onValueChange={(v) => setTab(v as 'status' | 'log')}>
-          <TabsList>
-            <TabsTrigger value="status">
-              <Gauge data-icon="inline-start" /> Status
-              {running && <span className="ml-1 size-1.5 animate-pulse rounded-full bg-primary" />}
-            </TabsTrigger>
-            <TabsTrigger value="log">Log</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="status">
-            <div className="flex flex-col items-center gap-6 py-2 sm:flex-row sm:items-center sm:gap-8">
-              <div className="relative grid shrink-0 place-items-center">
-                <svg viewBox="0 0 184 184" className="size-40 -rotate-90">
-                  <circle cx="92" cy="92" r={RING_R} fill="none" stroke="var(--muted)" strokeWidth="12" />
-                  <circle
-                    cx="92" cy="92" r={RING_R} fill="none" stroke="var(--primary)" strokeWidth="12" strokeLinecap="round"
-                    strokeDasharray={RING_C} strokeDashoffset={RING_C * (1 - pct / 100)}
-                    className="transition-[stroke-dashoffset] duration-500"
-                  />
-                </svg>
-                <div className="absolute flex flex-col items-center gap-1">
-                  <span className="text-3xl font-semibold tabular-nums">
-                    {pct.toFixed(pct >= 100 ? 0 : 1)}<span className="text-lg text-muted-foreground">%</span>
-                  </span>
-                  <Badge variant={running ? 'default' : 'secondary'}>{stateWord}</Badge>
-                </div>
+          </div>
+          {session?.source === 'system' && <Alert><AlertDescription>Process detected on this system. Live output and stop controls are available only for sessions started by this panel.</AlertDescription></Alert>}
+          <div className="min-w-0" aria-label="Session status">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="text-sm text-muted-foreground">Progress</span>
+                <span className="font-mono text-4xl tabular-nums sm:text-5xl">{progressKnown ? `${pct.toFixed(pct >= 100 ? 0 : 1)}%` : '—'}</span>
               </div>
-              <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3">
-                <Stat label="speed">{st?.speed || '—'}</Stat>
-                <Stat label="recovered">{st?.recovered || '—'}</Stat>
-                <Stat label="eta">{st?.eta || '—'}</Stat>
-                <Stat label="gpu">{tempVal ? `${tempVal}°C` : '—'}{st?.util ? ` · ${st.util}%` : ''}</Stat>
-                <Stat label="current phrase" className="col-span-2 sm:col-span-3">
-                  <span className="font-mono break-all">{st?.candidate || (running ? 'warming up…' : 'awaiting run')}</span>
-                </Stat>
-                <Stat label="progress" className="col-span-2 sm:col-span-3">
-                  {st?.done && st?.total ? `${(+st.done).toLocaleString()} / ${(+st.total).toLocaleString()}` : '—'}
-                </Stat>
+              <div role="progressbar" aria-label="Crack progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressKnown ? Math.min(100, Math.max(0, pct)) : undefined} aria-valuetext={progressKnown ? `${pct.toFixed(1)}%` : running ? 'Waiting for engine progress' : 'No progress reported'} className="my-3 h-2.5 overflow-hidden rounded-full bg-muted">
+                <div className="h-full rounded-full bg-primary transition-[width] duration-500 motion-reduce:transition-none" style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} />
               </div>
+              <p className="font-mono text-xs text-muted-foreground tabular-nums">{st?.done && st?.total ? `${(+st.done).toLocaleString()} / ${(+st.total).toLocaleString()}` : running ? 'Waiting for engine progress…' : 'No progress reported'}</p>
+              <div className="mt-5 grid grid-cols-2 gap-x-4 border-y sm:grid-cols-4">
+                <Stat label="Speed">{st?.speed || '—'}</Stat>
+                <Stat label="ETA">{st?.eta || '—'}</Stat>
+                <Stat label="Recovered">{st?.recovered || '—'}</Stat>
+                <Stat label="GPU">{tempVal != null ? `${tempVal}°C` : '—'}{st?.util ? ` · ${st.util}%` : ''}</Stat>
+              </div>
+              <div className="pt-5">
+                <p className="text-xs text-muted-foreground">Current candidate</p>
+                <p className="mt-2 break-all font-mono text-base">{st?.candidate || (running ? 'Waiting for engine output…' : '—')}</p>
+              </div>
+          </div>
+          <section aria-labelledby="engine-output-title" className="min-w-0 border-t pt-5">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 id="engine-output-title" className="text-sm font-medium">{session?.source === 'system' ? 'Process command' : 'Engine output'}</h3>
+              <span className="text-xs text-muted-foreground">{session?.source === 'system' ? 'Output unavailable' : running ? 'Following saved output' : 'Saved output'}</span>
             </div>
-          </TabsContent>
-
-          <TabsContent value="log">
-            {session?.source === 'system' ? (
-              <pre ref={preRef} className="max-h-96 overflow-auto rounded-lg border bg-muted/30 p-3 font-mono text-xs leading-relaxed whitespace-pre">
-                {session.command}
-              </pre>
-            ) : log ? (
-              <LogTerminal key={session?.id ?? 'none'} data={log} />
-            ) : (
-              <div className="rounded-lg border bg-muted/30 p-3 font-mono text-xs text-muted-foreground">No output yet.</div>
-            )}
-          </TabsContent>
-        </Tabs>
-      </CardContent>
-    </Card>
+              {session?.source === 'system' ? (
+                <pre ref={preRef} className="max-h-96 overflow-auto rounded-lg border bg-muted/30 p-3 font-mono text-xs leading-relaxed whitespace-pre">{session.command}</pre>
+              ) : log ? <LogTerminal key={session?.id ?? 'none'} data={log} /> : (
+                <Empty className="min-h-52"><EmptyHeader><EmptyTitle>No output yet</EmptyTitle><EmptyDescription>Saved engine output appears here when a session starts.</EmptyDescription></EmptyHeader></Empty>
+              )}
+              {session?.logTruncated && <p className="mt-3 text-xs text-muted-foreground">Showing the latest 256 KB of output. Full log saved on disk.</p>}
+          </section>
+          <p className="mt-auto pt-2 text-xs text-muted-foreground">Sessions keep running when you refresh or close this page.</p>
+        </div>
+      </div>
+    </section>
   );
 
   const resultsCard = results && (
@@ -732,8 +728,16 @@ export default function Page() {
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
+            <SessionHistory sessions={sessions} selectedId={session?.id} loaded={sessionsLoaded}
+              onSelect={(session) => { selectSession(session); setView('overview'); }} />
           </SidebarContent>
           <SidebarFooter>
+            <div className="flex items-center justify-between gap-2 px-2 group-data-[collapsible=icon]:hidden">
+              <span className="text-xs text-muted-foreground">{activeSessions} active</span>
+              <Button variant="ghost" size="icon-sm" aria-label="Clear finished sessions" title="Clear finished sessions" onClick={clearSessions} disabled={clearing || !finishedCount}>
+                {clearing ? <Spinner /> : <Trash2 />}
+              </Button>
+            </div>
             <div className="flex flex-wrap gap-1 px-1 pb-1 group-data-[collapsible=icon]:hidden">
               {DIRS.map((d) => (
                 <Badge key={d} variant="secondary">
@@ -755,16 +759,19 @@ export default function Page() {
             <Badge variant={tempVal != null && tempVal > 85 ? 'destructive' : 'outline'}>gpu{tempVal ? ` ${tempVal}°` : ''}</Badge>
             <ThemeToggle />
           </header>
-          <main className="flex flex-1 flex-col gap-4 p-4 md:p-6">
+          <main className="flex min-w-0 flex-1 flex-col gap-6 px-5 py-7 md:px-8 md:py-8">
+            {(sessionError || streamError) && <Alert variant="destructive"><AlertDescription>{sessionError || streamError}</AlertDescription></Alert>}
             {view === 'files' && stationsGrid}
-            {view === 'sessions' && systemSessionsCard}
-            {view === 'overview' && (
-              <>
-                {crackCard}
-                {systemSessionsCard}
-                {resultsCard}
-              </>
-            )}
+            {view === 'overview' && crackWorkspace}
+            {view === 'keys' && (resultsCard ?? (
+              <Empty className="min-h-52">
+                <EmptyHeader>
+                  <EmptyTitle>No recovered key</EmptyTitle>
+                  <EmptyDescription>Recovered keys for the selected session appear here. You can also show a hash’s key from Files.</EmptyDescription>
+                </EmptyHeader>
+                <Button variant="outline" onClick={() => setView('files')}><FolderOpen data-icon="inline-start" /> Open files</Button>
+              </Empty>
+            ))}
           </main>
         </SidebarInset>
       </SidebarProvider>
