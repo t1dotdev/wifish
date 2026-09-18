@@ -431,7 +431,7 @@ export default function Page() {
       <div className="mx-auto flex max-w-7xl flex-col gap-4 p-4 md:p-6">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-baseline gap-2.5">
-            <h1 className="text-xl font-semibold tracking-tight">wifish</h1>
+            <h1 className="font-[family-name:var(--font-pixel)] text-base tracking-tight">wifish</h1>
             <p className="text-sm text-muted-foreground">WPA · WPA2 handshake console</p>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
