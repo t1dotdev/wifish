@@ -12,6 +12,8 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
 import { Spinner } from '@/components/ui/spinner';
 import { Toaster, toast } from '@/components/ui/toast';
+import type { Terminal as XTerm } from '@xterm/xterm';
+import '@xterm/xterm/css/xterm.css';
 import { ThemeToggle } from '@/components/theme-toggle';
 
 type DirKind = 'pcap' | 'hc22000' | 'wordlists' | 'cracked';
@@ -67,6 +69,9 @@ const fmt = (n: number) => {
   if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`;
   return `${(n / 1024 ** 3).toFixed(2)} GB`;
 };
+
+// mirror of the server-side clean(): strip ANSI so the status parsers see plain text.
+const stripAnsi = (s: string) => s.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/[\x00\x07\x08]/g, '');
 
 function parseStatus(log: string, method: Method): CrackStatus | null {
   return method === 'aircrack' ? parseAircrack(log) : parseHashcat(log);
@@ -169,6 +174,50 @@ function Stat({ label, children, className }: { label: string; children: React.R
   );
 }
 
+// aircrack-ng paints its screen with absolute cursor codes, so raw output only
+// reads correctly through a real VT emulator. xterm replays it as the terminal drew it.
+// ponytail: 80x25 is aircrack-ng's assumed screen when stdout is not a TTY; tune if a build differs.
+const TERM_COLS = 80;
+const TERM_ROWS = 25;
+
+function LogTerminal({ data }: { data: string }) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const termRef = useRef<XTerm | null>(null);
+  const writtenRef = useRef('');
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let disposed = false;
+    let term: XTerm | null = null;
+    (async () => {
+      const { Terminal } = await import('@xterm/xterm');
+      if (disposed || !hostRef.current) return;
+      term = new Terminal({
+        cols: TERM_COLS, rows: TERM_ROWS, disableStdin: true, convertEol: true, scrollback: 2000,
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 12,
+        theme: { background: '#0a0a0a', foreground: '#e5e5e5' },
+      });
+      term.open(hostRef.current);
+      termRef.current = term;
+      setReady(true);
+    })();
+    return () => { disposed = true; term?.dispose(); termRef.current = null; writtenRef.current = ''; };
+  }, []);
+
+  // The log file only grows, so a matching prefix is a pure append — write just the delta;
+  // otherwise (session switch, truncation window shift) reset and repaint.
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term || !ready) return;
+    const prev = writtenRef.current;
+    if (prev && data.startsWith(prev)) term.write(data.slice(prev.length));
+    else { term.reset(); term.write(data); }
+    writtenRef.current = data;
+  }, [data, ready]);
+
+  return <div ref={hostRef} className="w-fit max-w-full overflow-hidden rounded-lg border bg-[#0a0a0a] p-2" />;
+}
+
 export default function Page() {
   const [files, setFiles] = useState<Record<DirKind, FileEntry[]>>({ pcap: [], hc22000: [], wordlists: [], cracked: [] });
   const [selPcap, setSelPcap] = useState('');
@@ -196,7 +245,8 @@ export default function Page() {
   const [results, setResults] = useState<CrackResult[] | null>(null);
   const preRef = useRef<HTMLPreElement | null>(null);
 
-  const st = useMemo(() => parseStatus(log, session?.method || method), [log, method, session?.method]);
+  const cleanLog = useMemo(() => stripAnsi(log), [log]);
+  const st = useMemo(() => parseStatus(cleanLog, session?.method || method), [cleanLog, method, session?.method]);
   const pct = st?.pct ?? 0;
 
   const flash = (msg: string, err = false) => { toast.add({ title: msg, type: err ? 'error' : 'success' }); };
@@ -271,7 +321,7 @@ export default function Page() {
         // A slow snapshot must never overwrite newer output already delivered by the stream.
         if (streamingRef.current !== id || !['running', 'stopping'].includes(current.status)) setLog(current.log || '');
         if (current.source === 'panel' && !['running', 'stopping'].includes(current.status) && !completedRef.current.has(id)) {
-          let recovered: CrackResult[] = current.results || parseAircrackKey(current.log || '') || [];
+          let recovered: CrackResult[] = current.results || parseAircrackKey(stripAnsi(current.log || '')) || [];
           if (current.method === 'hashcat') {
             const response = await fetch('/api/cracked', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ hash: current.target }), signal: controller.signal });
             const data = await response.json();
@@ -608,14 +658,15 @@ export default function Page() {
                   </TabsContent>
 
                   <TabsContent value="log">
-                    <pre
-                      ref={preRef}
-                      className="max-h-96 overflow-auto rounded-lg border bg-muted/30 p-3 font-mono text-xs leading-relaxed whitespace-pre"
-                    >
-                      {session?.source === 'system'
-                        ? session.command
-                        : (log || <span className="text-muted-foreground">No output yet.</span>)}
-                    </pre>
+                    {session?.source === 'system' ? (
+                      <pre ref={preRef} className="max-h-96 overflow-auto rounded-lg border bg-muted/30 p-3 font-mono text-xs leading-relaxed whitespace-pre">
+                        {session.command}
+                      </pre>
+                    ) : log ? (
+                      <LogTerminal key={session?.id ?? 'none'} data={log} />
+                    ) : (
+                      <div className="rounded-lg border bg-muted/30 p-3 font-mono text-xs text-muted-foreground">No output yet.</div>
+                    )}
                   </TabsContent>
                 </Tabs>
               </CardContent>

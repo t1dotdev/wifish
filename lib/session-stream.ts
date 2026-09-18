@@ -32,7 +32,7 @@ export function createLogStream(id: string, signal: AbortSignal | undefined, { d
         if (controller.desiredSize !== null && controller.desiredSize <= 0) return;
         reading = true;
         try {
-          const current = await readSavedLog(directory, id);
+          const current = await readSavedLog(directory, id, true);
           if (closed) return;
           if (current.log !== previous) {
             const data = previous !== null && current.log.startsWith(previous)

@@ -88,14 +88,17 @@ export async function discoverProcesses(): Promise<EngineProcess[]> {
   return parseProcesses(identities.stdout as string, commands.stdout as string);
 }
 
-export async function readSavedLog(directory: string, id: string): Promise<{ log: string; logTruncated: boolean }> {
+// raw=true keeps the ANSI cursor codes so a terminal emulator (xterm.js) can
+// replay the exact screen; the default cleans them for text parsing/matching.
+export async function readSavedLog(directory: string, id: string, raw = false): Promise<{ log: string; logTruncated: boolean }> {
     const file = await fs.open(path.join(directory, `${id}.log`), 'r');
     try {
       const { size } = await file.stat();
       const length = Math.min(size, 256 * 1024);
       const buffer = Buffer.alloc(length);
       const { bytesRead } = await file.read(buffer, 0, length, size - length);
-      return { log: clean(buffer.subarray(0, bytesRead).toString('utf8')), logTruncated: size > length };
+      const text = buffer.subarray(0, bytesRead).toString('utf8');
+      return { log: raw ? text : clean(text), logTruncated: size > length };
     } finally { await file.close(); }
   }
 
@@ -146,7 +149,8 @@ export function createSessionStore({ directory = path.join(process.cwd(), '.wifi
     const session = sessions.find((s) => s.id === id);
     if (!session) throw failure('Session no longer available', 404);
     if (session.source === 'system') return { ...session, log: '', logAvailable: false };
-    return { ...session, ...await readLog(id), logAvailable: true };
+    // Client gets raw output for the terminal view; internal result-matching still uses clean().
+    return { ...session, ...await readSavedLog(directory, id, true), logAvailable: true };
   }
   async function start({ method, target, wordlist, command, args }: StartSpec): Promise<SessionRecord> {
     if (starting) throw failure('A session is already starting', 409);
