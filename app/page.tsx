@@ -12,6 +12,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
 import { Spinner } from '@/components/ui/spinner';
 import { Toaster, toast } from '@/components/ui/toast';
+import { ThemeToggle } from '@/components/theme-toggle';
 
 type DirKind = 'pcap' | 'hc22000' | 'wordlists' | 'cracked';
 type Method = 'hashcat' | 'aircrack';
@@ -391,6 +392,7 @@ export default function Page() {
               </Badge>
             ))}
             <Badge variant={tempVal != null && tempVal > 85 ? 'destructive' : 'outline'}>gpu{tempVal ? ` ${tempVal}°` : ''}</Badge>
+            <ThemeToggle />
           </div>
         </header>
 
@@ -518,8 +520,10 @@ export default function Page() {
                 )}
               </CardContent>
             </Card>
+          </div>
+        </div>
 
-            {/* crack — hero */}
+        {/* crack — hero (full width) */}
             <Card>
               <CardHeader>
                 <div className="flex items-center gap-2">
@@ -606,7 +610,7 @@ export default function Page() {
                   <TabsContent value="log">
                     <pre
                       ref={preRef}
-                      className="max-h-96 overflow-auto rounded-lg border bg-muted/30 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap"
+                      className="max-h-96 overflow-auto rounded-lg border bg-muted/30 p-3 font-mono text-xs leading-relaxed whitespace-pre"
                     >
                       {session?.source === 'system'
                         ? session.command
@@ -651,8 +655,6 @@ export default function Page() {
                 </CardContent>
               </Card>
             )}
-          </div>
-        </div>
       </div>
       <Toaster />
     </div>
