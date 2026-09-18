@@ -84,7 +84,7 @@ const sessionDuration = (s: { startedAt?: string; endedAt?: string }) =>
 const statusTone = (word: string) => {
   const w = word.toLowerCase();
   if (w === 'cracked') return { dot: 'bg-emerald-500', badge: 'bg-emerald-500/15 text-emerald-500' };
-  if (w === 'failed') return { dot: 'bg-destructive', badge: 'bg-destructive/10 text-destructive' };
+  if (w === 'failed' || w === 'exhausted') return { dot: 'bg-destructive', badge: 'bg-destructive/10 text-destructive' };
   if (w === 'aborted' || w === 'stopping') return { dot: 'bg-amber-500', badge: 'bg-amber-500/15 text-amber-500' };
   if (w === 'running' || w === 'paused') return { dot: 'bg-primary', badge: 'bg-primary/15 text-primary' };
   return { dot: 'bg-muted-foreground', badge: 'bg-secondary text-secondary-foreground' };
