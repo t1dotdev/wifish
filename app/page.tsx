@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ComponentType } from 'react';
 import type { CrackResult, FileEntry } from '@/lib/fs';
-import { Wifi, Hash, List, KeyRound, Zap, FileCog, Upload, Download, Trash2, Play, Square, Gauge } from 'lucide-react';
+import { Wifi, Hash, List, KeyRound, Zap, FileCog, Upload, Download, Trash2, Play, Square, Gauge, LayoutGrid, FolderOpen, Activity } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Card, CardHeader, CardTitle, CardDescription, CardAction, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,6 +15,12 @@ import { Toaster, toast } from '@/components/ui/toast';
 import type { Terminal as XTerm } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import {
+  Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarHeader,
+  SidebarInset, SidebarMenu, SidebarMenuBadge, SidebarMenuButton, SidebarMenuItem,
+  SidebarProvider, SidebarTrigger,
+} from '@/components/ui/sidebar';
 
 type DirKind = 'pcap' | 'hc22000' | 'wordlists' | 'cracked';
 type Method = 'hashcat' | 'aircrack';
@@ -227,6 +233,7 @@ export default function Page() {
   const [shownHash, setShownHash] = useState('');
   const [selList, setSelList] = useState('');
   const [log, setLog] = useState('');
+  const [view, setView] = useState<'overview' | 'files' | 'sessions'>('overview');
   const [tab, setTab] = useState<'status' | 'log'>('status');
   const [sessions, setSessions] = useState<SessionView[]>([]);
   const [session, setSession] = useState<SessionView | null>(null);
@@ -422,292 +429,344 @@ export default function Page() {
   }
 
   const n = (d: DirKind) => files[d]?.length || 0;
+  const totalFiles = DIRS.reduce((a, d) => a + n(d), 0);
   const stateWord = session?.status === 'stopping' ? 'Stopping' : session?.processState === 'paused' ? 'Paused' : session && !running ? (st?.status === 'Cracked' || st?.status === 'Exhausted' ? st.status : session.status) : st?.status ? st.status.split(' ')[0] : (running ? 'Running' : 'Ready');
   const tempVal = st?.temp ? +st.temp : null;
   const activeSessions = sessions.filter((s) => ['running', 'stopping'].includes(s.status)).length;
 
-  return (
-    <div className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto flex max-w-7xl flex-col gap-4 p-4 md:p-6">
-        <header className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-baseline gap-2.5">
-            <h1 className="font-[family-name:var(--font-pixel)] text-base tracking-tight">wifish</h1>
-            <p className="text-sm text-muted-foreground">WPA · WPA2 handshake console</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {DIRS.map((d) => (
-              <Badge key={d} variant="secondary">
-                {STATIONS[d].label}
-                <span className="font-semibold tabular-nums">{n(d)}</span>
-              </Badge>
-            ))}
-            <Badge variant={tempVal != null && tempVal > 85 ? 'destructive' : 'outline'}>gpu{tempVal ? ` ${tempVal}°` : ''}</Badge>
-            <ThemeToggle />
-          </div>
-        </header>
+  const NAV = [
+    { key: 'overview', label: 'Overview', icon: LayoutGrid, badge: 0 },
+    { key: 'files', label: 'Files', icon: FolderOpen, badge: totalFiles },
+    { key: 'sessions', label: 'Sessions', icon: Activity, badge: activeSessions },
+  ] as const;
+  const title = view === 'files' ? 'Files' : view === 'sessions' ? 'Sessions' : 'Overview';
 
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)]">
-          {/* ---- left: four stations ---- */}
-          <div className="flex flex-col gap-4">
-            {DIRS.map((dir) => {
-              const s = STATIONS[dir];
-              const Glyph = s.icon;
-              return (
-                <Card key={dir}>
-                  <CardHeader>
-                    <div className="flex items-center gap-2">
-                      <Glyph className="size-4 text-muted-foreground" />
-                      <CardTitle className="lowercase">{s.label}</CardTitle>
-                    </div>
-                    <CardDescription>{n(dir)} · {s.sub}</CardDescription>
-                    <CardAction><Badge variant="outline" className="tabular-nums">{s.idx}</Badge></CardAction>
-                  </CardHeader>
-                  <CardContent>
-                    {n(dir) === 0 ? (
-                      <Empty className="py-6">
-                        <EmptyHeader>
-                          <EmptyTitle className="text-sm">No files yet</EmptyTitle>
-                          <EmptyDescription>Upload {s.sub} to get started.</EmptyDescription>
-                        </EmptyHeader>
-                      </Empty>
-                    ) : (
-                      <ul className="flex flex-col gap-0.5">
-                        {(files[dir] || []).map((f) => (
-                          <li key={f.name} className="group flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted/60">
-                            <span className="flex-1 truncate text-sm" title={f.name}>{f.name}</span>
-                            <span className="text-xs text-muted-foreground tabular-nums">{fmt(f.size)}</span>
-                            <div className="flex items-center gap-0.5">
-                              {dir === 'hc22000' && (
-                                <Button variant="ghost" size="icon-sm" aria-label="show cracked key" onClick={() => showCracked(f.name)}><KeyRound /></Button>
-                              )}
-                              <Button variant="ghost" size="icon-sm" aria-label="download" nativeButton={false} render={<a href={`/api/file?dir=${dir}&name=${encodeURIComponent(f.name)}`} />}><Download /></Button>
-                              <Button variant="destructive" size="icon-sm" aria-label="delete" onClick={() => del(dir, f.name)}><Trash2 /></Button>
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </CardContent>
-                  {dir !== 'cracked' && (
-                    <CardFooter>
-                      <Button variant="outline" size="sm" className="w-full" nativeButton={false} render={<label />}>
-                        <Upload data-icon="inline-start" /> add {s.label}
-                        <input type="file" multiple className="sr-only" onChange={(e) => upload(dir, e)} />
-                      </Button>
-                    </CardFooter>
+  // ---- four directory stations ----
+  const stationsGrid = (
+    <div className="grid gap-4 md:grid-cols-2">
+      {DIRS.map((dir) => {
+        const s = STATIONS[dir];
+        const Glyph = s.icon;
+        return (
+          <Card key={dir}>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Glyph className="size-4 text-muted-foreground" />
+                <CardTitle className="lowercase">{s.label}</CardTitle>
+              </div>
+              <CardDescription>{n(dir)} · {s.sub}</CardDescription>
+              <CardAction><Badge variant="outline" className="tabular-nums">{s.idx}</Badge></CardAction>
+            </CardHeader>
+            <CardContent>
+              {n(dir) === 0 ? (
+                <Empty className="py-6">
+                  <EmptyHeader>
+                    <EmptyTitle className="text-sm">No files yet</EmptyTitle>
+                    <EmptyDescription>Upload {s.sub} to get started.</EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              ) : (
+                <ul className="flex flex-col gap-0.5">
+                  {(files[dir] || []).map((f) => (
+                    <li key={f.name} className="group flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted/60">
+                      <span className="flex-1 truncate text-sm" title={f.name}>{f.name}</span>
+                      <span className="text-xs text-muted-foreground tabular-nums">{fmt(f.size)}</span>
+                      <div className="flex items-center gap-0.5">
+                        {dir === 'hc22000' && (
+                          <Button variant="ghost" size="icon-sm" aria-label="show cracked key" onClick={() => showCracked(f.name)}><KeyRound /></Button>
+                        )}
+                        <Button variant="ghost" size="icon-sm" aria-label="download" nativeButton={false} render={<a href={`/api/file?dir=${dir}&name=${encodeURIComponent(f.name)}`} />}><Download /></Button>
+                        <Button variant="destructive" size="icon-sm" aria-label="delete" onClick={() => del(dir, f.name)}><Trash2 /></Button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+            {dir !== 'cracked' && (
+              <CardFooter>
+                <Button variant="outline" size="sm" className="w-full" nativeButton={false} render={<label />}>
+                  <Upload data-icon="inline-start" /> add {s.label}
+                  <input type="file" multiple className="sr-only" onChange={(e) => upload(dir, e)} />
+                </Button>
+              </CardFooter>
+            )}
+          </Card>
+        );
+      })}
+    </div>
+  );
+
+  const convertCard = (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <FileCog className="size-4 text-muted-foreground" />
+          <CardTitle className="lowercase">convert</CardTitle>
+        </div>
+        <CardDescription>pcap → .hc22000</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2 sm:flex-row">
+        <FileSelect icon={Wifi} value={selPcap} onValueChange={setSelPcap} placeholder="Select a capture…" files={files.pcap} ariaLabel="capture to convert" />
+        <Button onClick={convert} disabled={!selPcap}><FileCog data-icon="inline-start" /> Convert</Button>
+      </CardContent>
+    </Card>
+  );
+
+  const systemSessionsCard = (
+    <Card aria-label="System sessions">
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <List className="size-4 text-muted-foreground" />
+          <CardTitle>System sessions</CardTitle>
+        </div>
+        <CardDescription>{sessionsLoaded ? `${activeSessions} active · this system` : 'checking system…'}</CardDescription>
+        <CardAction>
+          <Button variant="destructive" size="icon-sm" aria-label="clear finished sessions" onClick={clearSessions} disabled={clearing || !finishedCount}>
+            {clearing ? <Spinner /> : <Trash2 />}
+          </Button>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        <p className="text-xs text-muted-foreground">Sessions keep running when you refresh or close this page.</p>
+        {(sessionError || streamError) && (
+          <Alert variant="destructive"><AlertDescription>{sessionError || streamError}</AlertDescription></Alert>
+        )}
+        {sessionsLoaded && sessions.length === 0 && !sessionError && (
+          <p className="text-xs text-muted-foreground">No hashcat or aircrack-ng sessions running. Choose a target and wordlist below to start.</p>
+        )}
+        {sessions.length > 0 && (
+          <ul className="flex flex-col gap-1.5">
+            {sessions.map((s) => (
+              <li key={s.id}>
+                <button
+                  type="button"
+                  aria-pressed={session?.id === s.id}
+                  onClick={() => selectSession(s)}
+                  className={cn(
+                    'flex w-full flex-col gap-1 rounded-lg border p-2.5 text-left transition-colors hover:bg-muted/60',
+                    session?.id === s.id && 'border-ring bg-muted',
                   )}
-                </Card>
-              );
-            })}
-          </div>
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium">{s.method === 'aircrack' ? 'aircrack-ng' : 'hashcat'}</span>
+                    <Badge variant={['running', 'stopping'].includes(s.status) ? 'default' : 'secondary'}>
+                      {s.processState === 'paused' ? 'paused' : s.status}
+                    </Badge>
+                  </span>
+                  <span className="truncate text-xs text-muted-foreground" title={s.target || s.command}>{s.target || s.command}</span>
+                  <span className="text-xs text-muted-foreground">
+                    PID {s.pid || '—'} · {s.source === 'panel' ? 'panel' : 'started outside panel'} · {new Date(s.startedAt).toLocaleString()}{s.wordlist ? ` · ${s.wordlist}` : ''}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
 
-          {/* ---- right: operate ---- */}
-          <div className="flex flex-col gap-4">
-            {/* convert */}
-            <Card>
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <FileCog className="size-4 text-muted-foreground" />
-                  <CardTitle className="lowercase">convert</CardTitle>
-                </div>
-                <CardDescription>pcap → .hc22000</CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-2 sm:flex-row">
-                <FileSelect icon={Wifi} value={selPcap} onValueChange={setSelPcap} placeholder="Select a capture…" files={files.pcap} ariaLabel="capture to convert" />
-                <Button onClick={convert} disabled={!selPcap}><FileCog data-icon="inline-start" /> Convert</Button>
-              </CardContent>
-            </Card>
-
-            {/* system sessions */}
-            <Card aria-label="System sessions">
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <List className="size-4 text-muted-foreground" />
-                  <CardTitle>System sessions</CardTitle>
-                </div>
-                <CardDescription>{sessionsLoaded ? `${activeSessions} active · this system` : 'checking system…'}</CardDescription>
-                <CardAction>
-                  <Button variant="destructive" size="icon-sm" aria-label="clear finished sessions" onClick={clearSessions} disabled={clearing || !finishedCount}>
-                    {clearing ? <Spinner /> : <Trash2 />}
-                  </Button>
-                </CardAction>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-2">
-                <p className="text-xs text-muted-foreground">Sessions keep running when you refresh or close this page.</p>
-                {(sessionError || streamError) && (
-                  <Alert variant="destructive"><AlertDescription>{sessionError || streamError}</AlertDescription></Alert>
-                )}
-                {sessionsLoaded && sessions.length === 0 && !sessionError && (
-                  <p className="text-xs text-muted-foreground">No hashcat or aircrack-ng sessions running. Choose a target and wordlist below to start.</p>
-                )}
-                {sessions.length > 0 && (
-                  <ul className="flex flex-col gap-1.5">
-                    {sessions.map((s) => (
-                      <li key={s.id}>
-                        <button
-                          type="button"
-                          aria-pressed={session?.id === s.id}
-                          onClick={() => selectSession(s)}
-                          className={cn(
-                            'flex w-full flex-col gap-1 rounded-lg border p-2.5 text-left transition-colors hover:bg-muted/60',
-                            session?.id === s.id && 'border-ring bg-muted',
-                          )}
-                        >
-                          <span className="flex items-center justify-between gap-2">
-                            <span className="text-sm font-medium">{s.method === 'aircrack' ? 'aircrack-ng' : 'hashcat'}</span>
-                            <Badge variant={['running', 'stopping'].includes(s.status) ? 'default' : 'secondary'}>
-                              {s.processState === 'paused' ? 'paused' : s.status}
-                            </Badge>
-                          </span>
-                          <span className="truncate text-xs text-muted-foreground" title={s.target || s.command}>{s.target || s.command}</span>
-                          <span className="text-xs text-muted-foreground">
-                            PID {s.pid || '—'} · {s.source === 'panel' ? 'panel' : 'started outside panel'} · {new Date(s.startedAt).toLocaleString()}{s.wordlist ? ` · ${s.wordlist}` : ''}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </CardContent>
-            </Card>
-          </div>
+  const crackCard = (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Zap className="size-4 text-muted-foreground" />
+          <CardTitle className="lowercase">crack</CardTitle>
+        </div>
+        <CardDescription>{method === 'aircrack' ? 'aircrack-ng · dictionary' : 'hashcat -m 22000'}</CardDescription>
+        <CardAction>
+          <Tabs value={method} onValueChange={(v) => setMethod(v as Method)}>
+            <TabsList>
+              <TabsTrigger value="aircrack">aircrack-ng</TabsTrigger>
+              <TabsTrigger value="hashcat">hashcat</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <div className="flex flex-col gap-2 sm:flex-row">
+          {method === 'aircrack'
+            ? <FileSelect icon={Wifi} value={selCap} onValueChange={setSelCap} placeholder="Capture…" files={files.pcap} ariaLabel="capture to crack" />
+            : <FileSelect icon={Hash} value={selHash} onValueChange={setSelHash} placeholder="Hash…" files={files.hc22000} ariaLabel="hash to crack" />}
+          <FileSelect icon={List} value={selList} onValueChange={setSelList} placeholder="Wordlist…" files={files.wordlists} ariaLabel="wordlist" />
+          {running && session?.source === 'panel'
+            ? (
+              <Button variant="destructive" onClick={abort} disabled={stopping || session.status === 'stopping' || !session.canStop}>
+                {stopping || session.status === 'stopping' ? <Spinner data-icon="inline-start" /> : <Square data-icon="inline-start" />}
+                {stopping || session.status === 'stopping' ? 'Stopping…' : 'Abort'}
+              </Button>
+            )
+            : (
+              <Button onClick={crack} disabled={starting || panelBusy || !sessionsLoaded || (method === 'aircrack' ? !selCap : !selHash) || !selList}>
+                {starting ? <Spinner data-icon="inline-start" /> : <Play data-icon="inline-start" />}
+                {starting ? 'Starting…' : 'Run'}
+              </Button>
+            )}
         </div>
 
-        {/* crack — hero (full width) */}
-            <Card>
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <Zap className="size-4 text-muted-foreground" />
-                  <CardTitle className="lowercase">crack</CardTitle>
+        {session && <p className="text-xs text-muted-foreground">Viewing {session.method === 'aircrack' ? 'aircrack-ng' : 'hashcat'} · PID {session.pid || '—'} · {session.target || 'system session'}</p>}
+        {session?.source === 'system' && <p className="text-xs text-muted-foreground">Process detected on this system. Live output and stop controls are available only for sessions started by this panel.</p>}
+        {session?.logTruncated && <p className="text-xs text-muted-foreground">Showing the latest 256 KB of output. Full log saved on disk.</p>}
+
+        <Tabs value={tab} onValueChange={(v) => setTab(v as 'status' | 'log')}>
+          <TabsList>
+            <TabsTrigger value="status">
+              <Gauge data-icon="inline-start" /> Status
+              {running && <span className="ml-1 size-1.5 animate-pulse rounded-full bg-primary" />}
+            </TabsTrigger>
+            <TabsTrigger value="log">Log</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="status">
+            <div className="flex flex-col items-center gap-6 py-2 sm:flex-row sm:items-center sm:gap-8">
+              <div className="relative grid shrink-0 place-items-center">
+                <svg viewBox="0 0 184 184" className="size-40 -rotate-90">
+                  <circle cx="92" cy="92" r={RING_R} fill="none" stroke="var(--muted)" strokeWidth="12" />
+                  <circle
+                    cx="92" cy="92" r={RING_R} fill="none" stroke="var(--primary)" strokeWidth="12" strokeLinecap="round"
+                    strokeDasharray={RING_C} strokeDashoffset={RING_C * (1 - pct / 100)}
+                    className="transition-[stroke-dashoffset] duration-500"
+                  />
+                </svg>
+                <div className="absolute flex flex-col items-center gap-1">
+                  <span className="text-3xl font-semibold tabular-nums">
+                    {pct.toFixed(pct >= 100 ? 0 : 1)}<span className="text-lg text-muted-foreground">%</span>
+                  </span>
+                  <Badge variant={running ? 'default' : 'secondary'}>{stateWord}</Badge>
                 </div>
-                <CardDescription>{method === 'aircrack' ? 'aircrack-ng · dictionary' : 'hashcat -m 22000'}</CardDescription>
-                <CardAction>
-                  <Tabs value={method} onValueChange={(v) => setMethod(v as Method)}>
-                    <TabsList>
-                      <TabsTrigger value="aircrack">aircrack-ng</TabsTrigger>
-                      <TabsTrigger value="hashcat">hashcat</TabsTrigger>
-                    </TabsList>
-                  </Tabs>
-                </CardAction>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-3">
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  {method === 'aircrack'
-                    ? <FileSelect icon={Wifi} value={selCap} onValueChange={setSelCap} placeholder="Capture…" files={files.pcap} ariaLabel="capture to crack" />
-                    : <FileSelect icon={Hash} value={selHash} onValueChange={setSelHash} placeholder="Hash…" files={files.hc22000} ariaLabel="hash to crack" />}
-                  <FileSelect icon={List} value={selList} onValueChange={setSelList} placeholder="Wordlist…" files={files.wordlists} ariaLabel="wordlist" />
-                  {running && session?.source === 'panel'
-                    ? (
-                      <Button variant="destructive" onClick={abort} disabled={stopping || session.status === 'stopping' || !session.canStop}>
-                        {stopping || session.status === 'stopping' ? <Spinner data-icon="inline-start" /> : <Square data-icon="inline-start" />}
-                        {stopping || session.status === 'stopping' ? 'Stopping…' : 'Abort'}
-                      </Button>
-                    )
-                    : (
-                      <Button onClick={crack} disabled={starting || panelBusy || !sessionsLoaded || (method === 'aircrack' ? !selCap : !selHash) || !selList}>
-                        {starting ? <Spinner data-icon="inline-start" /> : <Play data-icon="inline-start" />}
-                        {starting ? 'Starting…' : 'Run'}
-                      </Button>
-                    )}
-                </div>
+              </div>
+              <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3">
+                <Stat label="speed">{st?.speed || '—'}</Stat>
+                <Stat label="recovered">{st?.recovered || '—'}</Stat>
+                <Stat label="eta">{st?.eta || '—'}</Stat>
+                <Stat label="gpu">{tempVal ? `${tempVal}°C` : '—'}{st?.util ? ` · ${st.util}%` : ''}</Stat>
+                <Stat label="current phrase" className="col-span-2 sm:col-span-3">
+                  <span className="font-mono break-all">{st?.candidate || (running ? 'warming up…' : 'awaiting run')}</span>
+                </Stat>
+                <Stat label="progress" className="col-span-2 sm:col-span-3">
+                  {st?.done && st?.total ? `${(+st.done).toLocaleString()} / ${(+st.total).toLocaleString()}` : '—'}
+                </Stat>
+              </div>
+            </div>
+          </TabsContent>
 
-                {session && <p className="text-xs text-muted-foreground">Viewing {session.method === 'aircrack' ? 'aircrack-ng' : 'hashcat'} · PID {session.pid || '—'} · {session.target || 'system session'}</p>}
-                {session?.source === 'system' && <p className="text-xs text-muted-foreground">Process detected on this system. Live output and stop controls are available only for sessions started by this panel.</p>}
-                {session?.logTruncated && <p className="text-xs text-muted-foreground">Showing the latest 256 KB of output. Full log saved on disk.</p>}
-
-                <Tabs value={tab} onValueChange={(v) => setTab(v as 'status' | 'log')}>
-                  <TabsList>
-                    <TabsTrigger value="status">
-                      <Gauge data-icon="inline-start" /> Status
-                      {running && <span className="ml-1 size-1.5 animate-pulse rounded-full bg-primary" />}
-                    </TabsTrigger>
-                    <TabsTrigger value="log">Log</TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="status">
-                    <div className="flex flex-col items-center gap-6 py-2 sm:flex-row sm:items-center sm:gap-8">
-                      <div className="relative grid shrink-0 place-items-center">
-                        <svg viewBox="0 0 184 184" className="size-40 -rotate-90">
-                          <circle cx="92" cy="92" r={RING_R} fill="none" stroke="var(--muted)" strokeWidth="12" />
-                          <circle
-                            cx="92" cy="92" r={RING_R} fill="none" stroke="var(--primary)" strokeWidth="12" strokeLinecap="round"
-                            strokeDasharray={RING_C} strokeDashoffset={RING_C * (1 - pct / 100)}
-                            className="transition-[stroke-dashoffset] duration-500"
-                          />
-                        </svg>
-                        <div className="absolute flex flex-col items-center gap-1">
-                          <span className="text-3xl font-semibold tabular-nums">
-                            {pct.toFixed(pct >= 100 ? 0 : 1)}<span className="text-lg text-muted-foreground">%</span>
-                          </span>
-                          <Badge variant={running ? 'default' : 'secondary'}>{stateWord}</Badge>
-                        </div>
-                      </div>
-                      <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3">
-                        <Stat label="speed">{st?.speed || '—'}</Stat>
-                        <Stat label="recovered">{st?.recovered || '—'}</Stat>
-                        <Stat label="eta">{st?.eta || '—'}</Stat>
-                        <Stat label="gpu">{tempVal ? `${tempVal}°C` : '—'}{st?.util ? ` · ${st.util}%` : ''}</Stat>
-                        <Stat label="current phrase" className="col-span-2 sm:col-span-3">
-                          <span className="font-mono break-all">{st?.candidate || (running ? 'warming up…' : 'awaiting run')}</span>
-                        </Stat>
-                        <Stat label="progress" className="col-span-2 sm:col-span-3">
-                          {st?.done && st?.total ? `${(+st.done).toLocaleString()} / ${(+st.total).toLocaleString()}` : '—'}
-                        </Stat>
-                      </div>
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="log">
-                    {session?.source === 'system' ? (
-                      <pre ref={preRef} className="max-h-96 overflow-auto rounded-lg border bg-muted/30 p-3 font-mono text-xs leading-relaxed whitespace-pre">
-                        {session.command}
-                      </pre>
-                    ) : log ? (
-                      <LogTerminal key={session?.id ?? 'none'} data={log} />
-                    ) : (
-                      <div className="rounded-lg border bg-muted/30 p-3 font-mono text-xs text-muted-foreground">No output yet.</div>
-                    )}
-                  </TabsContent>
-                </Tabs>
-              </CardContent>
-            </Card>
-
-            {/* recovered key readout */}
-            {results && (
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center gap-2">
-                    <KeyRound className="size-4 text-muted-foreground" />
-                    <CardTitle className="lowercase">recovered key</CardTitle>
-                  </div>
-                  <CardDescription className="truncate">{shownHash || selHash}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {results.length === 0 ? (
-                    <Empty className="py-6">
-                      <EmptyHeader>
-                        <EmptyTitle className="text-sm">No recovered key</EmptyTitle>
-                        <EmptyDescription>No recovered key found for this session.</EmptyDescription>
-                      </EmptyHeader>
-                    </Empty>
-                  ) : (
-                    <div className="flex flex-col gap-2">
-                      {results.map((r, i) => (
-                        <div key={i} className="rounded-lg border p-3">
-                          <div className="font-mono text-base font-semibold break-all">{r.password}</div>
-                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-                            <span>{r.ssid || '—'}</span>
-                            <span className="font-mono">{r.bssid || '—'}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+          <TabsContent value="log">
+            {session?.source === 'system' ? (
+              <pre ref={preRef} className="max-h-96 overflow-auto rounded-lg border bg-muted/30 p-3 font-mono text-xs leading-relaxed whitespace-pre">
+                {session.command}
+              </pre>
+            ) : log ? (
+              <LogTerminal key={session?.id ?? 'none'} data={log} />
+            ) : (
+              <div className="rounded-lg border bg-muted/30 p-3 font-mono text-xs text-muted-foreground">No output yet.</div>
             )}
-      </div>
+          </TabsContent>
+        </Tabs>
+      </CardContent>
+    </Card>
+  );
+
+  const resultsCard = results && (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <KeyRound className="size-4 text-muted-foreground" />
+          <CardTitle className="lowercase">recovered key</CardTitle>
+        </div>
+        <CardDescription className="truncate">{shownHash || selHash}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {results.length === 0 ? (
+          <Empty className="py-6">
+            <EmptyHeader>
+              <EmptyTitle className="text-sm">No recovered key</EmptyTitle>
+              <EmptyDescription>No recovered key found for this session.</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {results.map((r, i) => (
+              <div key={i} className="rounded-lg border p-3">
+                <div className="font-mono text-base font-semibold break-all">{r.password}</div>
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                  <span>{r.ssid || '—'}</span>
+                  <span className="font-mono">{r.bssid || '—'}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+
+  return (
+    <TooltipProvider>
+      <SidebarProvider>
+        <Sidebar collapsible="icon">
+          <SidebarHeader>
+            <div className="flex items-center gap-2 px-2 py-1.5">
+              <Wifi className="size-4 shrink-0 text-muted-foreground" />
+              <span className="font-[family-name:var(--font-pixel)] text-sm tracking-tight group-data-[collapsible=icon]:hidden">wifish</span>
+            </div>
+          </SidebarHeader>
+          <SidebarContent>
+            <SidebarGroup>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {NAV.map((item) => (
+                    <SidebarMenuItem key={item.key}>
+                      <SidebarMenuButton isActive={view === item.key} tooltip={item.label} onClick={() => setView(item.key)}>
+                        <item.icon />
+                        <span>{item.label}</span>
+                      </SidebarMenuButton>
+                      {item.badge ? <SidebarMenuBadge className="tabular-nums">{item.badge}</SidebarMenuBadge> : null}
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </SidebarContent>
+          <SidebarFooter>
+            <div className="flex flex-wrap gap-1 px-1 pb-1 group-data-[collapsible=icon]:hidden">
+              {DIRS.map((d) => (
+                <Badge key={d} variant="secondary">
+                  {STATIONS[d].label}
+                  <span className="font-semibold tabular-nums">{n(d)}</span>
+                </Badge>
+              ))}
+            </div>
+          </SidebarFooter>
+        </Sidebar>
+
+        <SidebarInset>
+          <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+            <SidebarTrigger className="-ml-1" />
+            <div className="flex flex-1 items-baseline gap-2.5">
+              <h1 className="text-base font-medium lowercase">{title}</h1>
+              <p className="hidden text-sm text-muted-foreground sm:block">WPA · WPA2 handshake console</p>
+            </div>
+            <Badge variant={tempVal != null && tempVal > 85 ? 'destructive' : 'outline'}>gpu{tempVal ? ` ${tempVal}°` : ''}</Badge>
+            <ThemeToggle />
+          </header>
+          <main className="flex flex-1 flex-col gap-4 p-4 md:p-6">
+            {view === 'files' && stationsGrid}
+            {view === 'sessions' && systemSessionsCard}
+            {view === 'overview' && (
+              <>
+                <div className="grid gap-4 lg:grid-cols-2">
+                  {convertCard}
+                  {systemSessionsCard}
+                </div>
+                {crackCard}
+                {resultsCard}
+              </>
+            )}
+          </main>
+        </SidebarInset>
+      </SidebarProvider>
       <Toaster />
-    </div>
+    </TooltipProvider>
   );
 }
