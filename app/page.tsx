@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
+import { Terminal } from '@/components/ui/terminal';
 import { Spinner } from '@/components/ui/spinner';
 import { Toaster, toast } from '@/components/ui/toast';
 import type { Terminal as XTerm } from '@xterm/xterm';
@@ -183,7 +184,16 @@ function Stat({ label, children, className }: { label: string; children: React.R
 const TERM_COLS = 80;
 const TERM_ROWS = 25;
 
-function LogTerminal({ data }: { data: string }) {
+const isDarkTheme = () => document.documentElement.classList.contains('dark');
+// ponytail: only default fg/bg flip; ANSI palette stays engine-default, so a few
+// bright colors sit low-contrast on the light bg. Add a light 16-color palette here
+// if that output ever needs it.
+const xtermTheme = (dark: boolean) =>
+  dark
+    ? { background: '#0a0a0a', foreground: '#e5e5e5' }
+    : { background: '#fafafa', foreground: '#1f2937' };
+
+function LogTerminal({ data, title }: { data: string; title?: string }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const writtenRef = useRef('');
@@ -198,7 +208,7 @@ function LogTerminal({ data }: { data: string }) {
       term = new Terminal({
         cols: TERM_COLS, rows: TERM_ROWS, disableStdin: true, convertEol: true, scrollback: 2000,
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 12,
-        theme: { background: '#0a0a0a', foreground: '#e5e5e5' },
+        theme: xtermTheme(isDarkTheme()),
       });
       term.open(hostRef.current);
       termRef.current = term;
@@ -218,7 +228,21 @@ function LogTerminal({ data }: { data: string }) {
     writtenRef.current = data;
   }, [data, ready]);
 
-  return <div ref={hostRef} className="max-w-full overflow-x-auto rounded-lg border bg-[#0a0a0a] p-2" />;
+  // Follow the .dark class toggled by ThemeToggle — repaint xterm's bg/fg to match.
+  useEffect(() => {
+    const root = document.documentElement;
+    const apply = () => { if (termRef.current) termRef.current.options.theme = xtermTheme(root.classList.contains('dark')); };
+    apply();
+    const obs = new MutationObserver(apply);
+    obs.observe(root, { attributes: true, attributeFilter: ['class'] });
+    return () => obs.disconnect();
+  }, [ready]);
+
+  return (
+    <Terminal title={title}>
+      <div ref={hostRef} className="max-w-full" />
+    </Terminal>
+  );
 }
 
 function SessionHistory({ sessions, selectedId, loaded, onSelect }: {
@@ -656,8 +680,10 @@ export default function Page() {
               <span className="text-xs text-muted-foreground">{session?.source === 'system' ? 'Output unavailable' : running ? 'Following saved output' : 'Saved output'}</span>
             </div>
               {session?.source === 'system' ? (
-                <pre ref={preRef} className="max-h-96 overflow-auto rounded-lg border bg-muted/30 p-3 font-mono text-xs leading-relaxed whitespace-pre">{session.command}</pre>
-              ) : log ? <LogTerminal key={session?.id ?? 'none'} data={log} /> : (
+                <Terminal title="process command">
+                  <pre ref={preRef} className="max-h-96 overflow-auto p-0 font-mono text-xs leading-relaxed whitespace-pre text-neutral-700 dark:text-neutral-200">{session.command}</pre>
+                </Terminal>
+              ) : log ? <LogTerminal key={session?.id ?? 'none'} data={log} title={`${session?.method === 'aircrack' ? 'aircrack-ng' : 'hashcat'} · ${running ? 'live' : 'saved output'}`} /> : (
                 <Empty className="min-h-52"><EmptyHeader><EmptyTitle>No output yet</EmptyTitle><EmptyDescription>Saved engine output appears here when a session starts.</EmptyDescription></EmptyHeader></Empty>
               )}
               {session?.logTruncated && <p className="mt-3 text-xs text-muted-foreground">Showing the latest 256 KB of output. Full log saved on disk.</p>}
@@ -708,8 +734,7 @@ export default function Page() {
         <Sidebar collapsible="icon">
           <SidebarHeader>
             <div className="flex items-center gap-2 px-2 py-1.5">
-              <Wifi className="size-4 shrink-0 text-muted-foreground" />
-              <span className="font-[family-name:var(--font-pixel)] text-sm tracking-tight group-data-[collapsible=icon]:hidden">wifish</span>
+              <span className="font-[family-name:var(--font-pixel)] text-sm tracking-tight text-primary group-data-[collapsible=icon]:hidden">wifish</span>
             </div>
           </SidebarHeader>
           <SidebarContent>
