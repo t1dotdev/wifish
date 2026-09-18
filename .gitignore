@@ -6,3 +6,4 @@ hashcat.potfile
 *.restore
 .impeccable
 *.tsbuildinfo
+.DS_Store

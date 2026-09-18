@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ComponentType } from 'react';
 import type { CrackResult, FileEntry } from '@/lib/fs';
-import { Wifi, Hash, List, KeyRound, Zap, FileCog, Upload, Download, Trash2, Play, Square, Gauge, LayoutGrid, FolderOpen, Activity } from 'lucide-react';
+import { Wifi, Hash, List, KeyRound, Zap, Upload, Download, Trash2, Play, Square, Gauge, LayoutGrid, FolderOpen, Activity } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Card, CardHeader, CardTitle, CardDescription, CardAction, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -171,6 +171,28 @@ function FileSelect({ icon: Icon, value, onValueChange, placeholder, files, aria
   );
 }
 
+// native HTML5 drag-drop; a <label> gives click-to-browse + keyboard focus for free.
+function Dropzone({ onFiles, accept, hint }: { onFiles: (list: FileList) => void; accept?: string; hint: string }) {
+  const [over, setOver] = useState(false);
+  return (
+    <label
+      onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => { e.preventDefault(); setOver(false); if (e.dataTransfer.files.length) onFiles(e.dataTransfer.files); }}
+      className={cn(
+        'flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed p-6 text-center transition-colors',
+        over ? 'border-ring bg-muted/60' : 'hover:bg-muted/40',
+      )}
+    >
+      <Upload className="size-5 text-muted-foreground" />
+      <span className="text-sm font-medium">Drop capture here or click to browse</span>
+      <span className="text-xs text-muted-foreground">{hint}</span>
+      <input type="file" accept={accept} multiple className="sr-only"
+        onChange={(e) => { if (e.target.files?.length) onFiles(e.target.files); e.target.value = ''; }} />
+    </label>
+  );
+}
+
 function Stat({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
   return (
     <div className={cn('rounded-lg border p-2.5', className)}>
@@ -226,7 +248,6 @@ function LogTerminal({ data }: { data: string }) {
 
 export default function Page() {
   const [files, setFiles] = useState<Record<DirKind, FileEntry[]>>({ pcap: [], hc22000: [], wordlists: [], cracked: [] });
-  const [selPcap, setSelPcap] = useState('');
   const [method, setMethod] = useState<Method>('aircrack');
   const [selHash, setSelHash] = useState('');   // hashcat target (.hc22000)
   const [selCap, setSelCap] = useState('');     // aircrack target (.pcap)
@@ -349,15 +370,31 @@ export default function Page() {
   useEffect(() => { refresh(); }, [refresh]);
   useEffect(() => { if (tab === 'log' && preRef.current) preRef.current.scrollTop = preRef.current.scrollHeight; }, [log, tab]);
 
-  async function upload(dir: DirKind, e: ChangeEvent<HTMLInputElement>) {
-    const list = e.target.files;
-    if (!list || !list.length) return;
-    for (const file of list) {
+  async function uploadFiles(dir: DirKind, list: FileList | File[]): Promise<string[]> {
+    const items = Array.from(list);
+    if (!items.length) return [];
+    const names: string[] = [];
+    for (const file of items) {
       const fd = new FormData(); fd.append('dir', dir); fd.append('file', file);
       const r = await fetch('/api/file', { method: 'POST', body: fd });
+      const j = await r.json().catch(() => ({}));
       if (!r.ok) flash(`upload failed: ${file.name}`, true);
+      else names.push(j.name ?? file.name);
     }
-    e.target.value = ''; flash(`uploaded to ${dir}/`); refresh();
+    flash(`uploaded to ${dir}/`); refresh();
+    return names;
+  }
+
+  // dropzone: upload each capture, then convert it straight to .hc22000
+  async function dropCapture(list: FileList) {
+    const names = await uploadFiles('pcap', list);
+    for (const name of names) await convertName(name);
+    if (names.length) refresh();
+  }
+
+  async function upload(dir: DirKind, e: ChangeEvent<HTMLInputElement>) {
+    await uploadFiles(dir, e.target.files || []);
+    e.target.value = '';
   }
 
   async function del(dir: DirKind, name: string) {
@@ -365,14 +402,15 @@ export default function Page() {
     if (r.ok) { flash(`deleted ${name}`); refresh(); } else flash('delete failed', true);
   }
 
-  async function convert() {
-    if (!selPcap) return flash('pick a capture first', true);
-    flash(`converting ${selPcap} …`);
-    const j = await (await fetch('/api/convert', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: selPcap }) })).json();
-    if (j.ok) { flash(`wrote ${j.out}${j.ssid ? ` · ${j.ssid}` : ''}`); refresh(); }
-    else flash(j.error || 'no handshake / PMKID found', true);
+  async function convertName(name: string): Promise<boolean> {
+    flash(`converting ${name} …`);
+    const j = await (await fetch('/api/convert', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) })).json();
+    if (j.ok) flash(`wrote ${j.out}${j.ssid ? ` · ${j.ssid}` : ''}`);
+    else flash(j.error || `no handshake / PMKID in ${name}`, true);
     if (!selectedRef.current) { setLog(j.log || ''); setTab('log'); }
+    return !!j.ok;
   }
+
 
   async function crack() {
     const target = method === 'aircrack' ? selCap : selHash;
@@ -497,18 +535,17 @@ export default function Page() {
     </div>
   );
 
-  const convertCard = (
+  const uploadCard = (
     <Card>
       <CardHeader>
         <div className="flex items-center gap-2">
-          <FileCog className="size-4 text-muted-foreground" />
-          <CardTitle className="lowercase">convert</CardTitle>
+          <Upload className="size-4 text-muted-foreground" />
+          <CardTitle className="lowercase">upload</CardTitle>
         </div>
-        <CardDescription>pcap → .hc22000</CardDescription>
+        <CardDescription>capture → auto .hc22000</CardDescription>
       </CardHeader>
-      <CardContent className="flex flex-col gap-2 sm:flex-row">
-        <FileSelect icon={Wifi} value={selPcap} onValueChange={setSelPcap} placeholder="Select a capture…" files={files.pcap} ariaLabel="capture to convert" />
-        <Button onClick={convert} disabled={!selPcap}><FileCog data-icon="inline-start" /> Convert</Button>
+      <CardContent>
+        <Dropzone accept=".pcap,.cap,.pcapng" hint="saves as pcap · auto-converts to .hc22000" onFiles={dropCapture} />
       </CardContent>
     </Card>
   );
@@ -756,7 +793,7 @@ export default function Page() {
             {view === 'overview' && (
               <>
                 <div className="grid gap-4 lg:grid-cols-2">
-                  {convertCard}
+                  {uploadCard}
                   {systemSessionsCard}
                 </div>
                 {crackCard}
