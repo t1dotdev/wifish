@@ -822,8 +822,8 @@ export default function Page() {
       <SidebarProvider>
         <Sidebar collapsible="icon">
           <SidebarHeader>
-            <div className="flex items-center gap-2 px-2 py-1.5">
-              <span className="font-[family-name:var(--font-pixel)] text-sm tracking-tight text-primary group-data-[collapsible=icon]:hidden">wifish</span>
+            <div className="flex items-center gap-2 px-2 py-3">
+              <span className="font-[family-name:var(--font-pixel)] text-lg tracking-tight text-primary group-data-[collapsible=icon]:hidden">wifish</span>
             </div>
           </SidebarHeader>
           <SidebarContent>
@@ -859,10 +859,9 @@ export default function Page() {
           <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
             <SidebarTrigger className="-ml-1" />
             <div className="flex flex-1 items-baseline gap-2.5">
-              <h1 className="text-base font-medium lowercase">{title}</h1>
+              <h1 className="text-base font-medium">{title}</h1>
               <p className="hidden text-sm text-muted-foreground sm:block">WPA · WPA2 handshake console</p>
             </div>
-            <Badge variant={tempVal != null && tempVal > 85 ? 'destructive' : 'outline'}>gpu{tempVal ? ` ${tempVal}°` : ''}</Badge>
             <ThemeToggle />
           </header>
           <main className="flex min-w-0 flex-1 flex-col gap-6 px-5 py-7 md:px-8 md:py-8">
