@@ -48,6 +48,7 @@ interface SessionView {
   command?: string;
   startedAt: string;
   endedAt?: string;
+  exitCode?: number | null;
   canStop?: boolean;
   log?: string;
   logTruncated?: boolean;
@@ -77,6 +78,25 @@ const fmtDur = (ms: number) => {
 // Duration for a finished session; null while running or if timestamps are missing.
 const sessionDuration = (s: { startedAt?: string; endedAt?: string }) =>
   s.endedAt && s.startedAt ? fmtDur(Date.parse(s.endedAt) - Date.parse(s.startedAt)) : null;
+
+// Semantic color per session state; drives the status badge + sidebar dot.
+// No success token in the theme, so cracked/aborted hardcode emerald/amber.
+const statusTone = (word: string) => {
+  const w = word.toLowerCase();
+  if (w === 'cracked') return { dot: 'bg-emerald-500', badge: 'bg-emerald-500/15 text-emerald-500' };
+  if (w === 'failed') return { dot: 'bg-destructive', badge: 'bg-destructive/10 text-destructive' };
+  if (w === 'aborted' || w === 'stopping') return { dot: 'bg-amber-500', badge: 'bg-amber-500/15 text-amber-500' };
+  if (w === 'running' || w === 'paused') return { dot: 'bg-primary', badge: 'bg-primary/15 text-primary' };
+  return { dot: 'bg-muted-foreground', badge: 'bg-secondary text-secondary-foreground' };
+};
+
+// A cleanly finished run is really Cracked or Exhausted (running/aborted/failed pass through).
+// hashcat exits 0 cracked / 1 exhausted; aircrack reports a key via results.
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const finishStatus = (s: { status: string; method: Method; exitCode?: number | null; results?: CrackResult[] }) => {
+  if (s.status !== 'finished') return s.status;
+  return (s.results?.length ?? 0) > 0 || (s.method === 'hashcat' && s.exitCode === 0) ? 'Cracked' : 'Exhausted';
+};
 
 const fmt = (n: number) => {
   if (n < 1024) return `${n} B`;
@@ -276,7 +296,7 @@ function SessionHistory({ sessions, selectedId, loaded, onSelect }: {
             <SidebarMenu>
               {[...group.items].sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt)).map((session) => {
                 const engine = session.method === 'aircrack' ? 'aircrack-ng' : 'hashcat';
-                const status = session.processState === 'paused' ? 'paused' : session.status;
+                const status = cap(session.processState === 'paused' ? 'paused' : finishStatus(session));
                 const name = session.target || `${engine} · PID ${session.pid || '—'}`;
                 const dur = sessionDuration(session);
                 return (
@@ -287,7 +307,10 @@ function SessionHistory({ sessions, selectedId, loaded, onSelect }: {
                       {active(session) ? <Activity /> : <Hash />}
                       <span className="flex min-w-0 flex-1 flex-col gap-0.5 group-data-[collapsible=icon]:hidden">
                         <span className="truncate">{name}</span>
-                        <span className="truncate text-xs text-muted-foreground">{engine} · {status}{dur ? ` · ${dur}` : ''}{session.source === 'system' ? ' · external' : ''}</span>
+                        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <span className={cn('size-1.5 shrink-0 rounded-full', statusTone(status).dot)} />
+                          <span className="truncate">{status} · {engine}{dur ? ` · ${dur}` : ''}{session.source === 'system' ? ' · external' : ''}</span>
+                        </span>
                       </span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -536,7 +559,7 @@ export default function Page() {
 
   const n = (d: DirKind) => files[d]?.length || 0;
   const totalFiles = DIRS.reduce((a, d) => a + n(d), 0);
-  const stateWord = session?.status === 'stopping' ? 'Stopping' : session?.processState === 'paused' ? 'Paused' : session && !running ? (st?.status === 'Cracked' || st?.status === 'Exhausted' ? st.status : session.status) : st?.status ? st.status.split(' ')[0] : (running ? 'Running' : 'Ready');
+  const stateWord = cap(session?.status === 'stopping' ? 'Stopping' : session?.processState === 'paused' ? 'Paused' : session && !running ? (st?.status === 'Cracked' || st?.status === 'Exhausted' ? st.status : finishStatus(session)) : st?.status ? st.status.split(' ')[0] : (running ? 'Running' : 'Ready'));
   const tempVal = st?.temp ? +st.temp : null;
   const activeSessions = sessions.filter((s) => ['running', 'stopping'].includes(s.status)).length;
 
@@ -664,7 +687,7 @@ export default function Page() {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-sm font-medium">{session ? 'Selected session' : 'Session monitor'}</h3>
-                <Badge variant={running ? 'default' : 'secondary'}>{stateWord}</Badge>
+                <Badge variant="secondary" className={statusTone(stateWord).badge}>{stateWord}</Badge>
               </div>
               <p className="mt-2 truncate font-mono text-sm" title={session?.target || session?.command || undefined}>
                 {session?.target || (session ? 'System process' : 'No session selected')}
@@ -828,14 +851,6 @@ export default function Page() {
               <Button variant="ghost" size="icon-sm" aria-label="Clear finished sessions" title="Clear finished sessions" onClick={clearSessions} disabled={clearing || !finishedCount}>
                 {clearing ? <Spinner /> : <Trash2 />}
               </Button>
-            </div>
-            <div className="flex flex-wrap gap-1 px-1 pb-1 group-data-[collapsible=icon]:hidden">
-              {DIRS.map((d) => (
-                <Badge key={d} variant="secondary">
-                  {STATIONS[d].label}
-                  <span className="font-semibold tabular-nums">{n(d)}</span>
-                </Badge>
-              ))}
             </div>
           </SidebarFooter>
         </Sidebar>
